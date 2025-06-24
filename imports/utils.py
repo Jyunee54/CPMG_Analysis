@@ -498,19 +498,34 @@ def gaussian_slope_px(M_lists: "data of M values", time_table: "time data",
 
 # The following two functions are used for producing index combinations to select multiple Target Period(TP)s for HPC models.
 # : these two functions are used for determining the number of spins in a single broad dip in CPMG signal
+# def return_combination_A_lists(chosen_indices, full_chosen_indices, cut_threshold):
+#     total_combination = []
+#     for temp_idx in chosen_indices:
+#         indices = []
+#         if type(temp_idx) == np.int64:
+#             temp_idx = np.array([temp_idx])
+#         for j in full_chosen_indices:
+#             abs_temp = np.abs(temp_idx - j)
+#             if len(abs_temp[abs_temp<cut_threshold]) == 0:
+#                 indices.append(j)
+#         temp_idx = list(temp_idx)
+#         total_combination += [temp_idx+[j] for j in indices]
+#     return np.array(total_combination)
 def return_combination_A_lists(chosen_indices, full_chosen_indices, cut_threshold):
-    total_combination = [] 
-    for temp_idx in chosen_indices: 
-        indices = [] 
-        if type(temp_idx) == np.int64: 
-            temp_idx = np.array([temp_idx]) 
-        for j in full_chosen_indices: 
-            abs_temp = np.abs(temp_idx - j) 
+    total_combination = set()
+    for temp_idx in chosen_indices:
+        indices = []
+        if type(temp_idx) == np.int64:
+            temp_idx = np.array([temp_idx])
+        for j in full_chosen_indices:
+            abs_temp = np.abs(temp_idx - j)
             if len(abs_temp[abs_temp<cut_threshold]) == 0:
-                indices.append(j) 
-        temp_idx = list(temp_idx) 
-        total_combination += [temp_idx+[j] for j in indices]
-    return np.array(total_combination) 
+                indices.append(j)
+        temp_idx = list(temp_idx)
+        for j in indices:
+            combo = tuple(sorted(temp_idx + [j]))
+            total_combination.add(combo)
+    return [list(c) for c in total_combination]
 
 def return_total_hier_index_list(A_list, cut_threshold):
     total_index_lists = []
@@ -529,9 +544,10 @@ def return_total_hier_index_list(A_list, cut_threshold):
 
     full_chosen_indices = np.arange(1, A_list_length-1) 
     half_chosen_indices = np.arange(1, final_idx) 
-    temp_index = return_combination_A_lists(half_chosen_indices, full_chosen_indices, cut_threshold=cut_threshold) 
+    temp_index = return_combination_A_lists(half_chosen_indices, full_chosen_indices, cut_threshold=cut_threshold)
+    seen = set(tuple(sorted(c)) for c in temp_index)  # 중복 제거용 집합
 
-    while 1:
+    while temp_index:
         if (A_list_length>=10) & (A_list_length<12):
             if len(temp_index[0])>=2: total_index_lists.append(temp_index)
         elif (A_list_length>=12) & (A_list_length<15): 
@@ -540,9 +556,18 @@ def return_total_hier_index_list(A_list, cut_threshold):
             if len(temp_index[0])>=4: total_index_lists.append(temp_index)
         else:
             total_index_lists.append(temp_index)
-        temp_index = return_combination_A_lists(temp_index, full_chosen_indices, cut_threshold=cut_threshold) 
-        if len(temp_index) == 0:break 
-    return np.array(total_index_lists) 
+
+        # temp_index = return_combination_A_lists(temp_index, full_chosen_indices, cut_threshold=cut_threshold)
+        temp_index = return_combination_A_lists(temp_index, full_chosen_indices, cut_threshold)
+        new = []
+        for combo in temp_index:
+            t = tuple(sorted(combo))
+            if t not in seen:
+                seen.add(t)
+                new.append(combo)
+        temp_index = new
+
+    return total_index_lists
 
 # Exclude unnecessary indices
 def return_reduced_hier_indices(hier_indices):
@@ -681,15 +706,6 @@ def HPC_prediction(model, AB_idx_set, total_indices, time_range, image_width, se
 
     return total_A_lists, total_raw_pred_list, total_deno_pred_list
 
-def return_the_number_of_spins(predicted_periods, spin_nums):
-    results = []
-    for i in range(len(predicted_periods)):
-        count = []
-        if len(spin_nums[i][1]) != 0:
-            # cnt = 0
-            # for j in range(len(spin_nums[i][1])):
-            #     cnt += np.argmax(spin_nums[i][1][j][0])
-            # count = [-1 for _ in range(cnt)]
-            count = [-1 for i in range(np.argmax(spin_nums[i][1][0]))]
-        results.append([predicted_periods[i], count])
-    return results
+def return_the_number_of_spins(predicted_periods, total_class_num):
+    spin_nums = [-1 for i in range(total_class_num)]
+    return [predicted_periods, spin_nums]

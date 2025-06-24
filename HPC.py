@@ -72,9 +72,10 @@ class Regression_Model():
 
     def close_pool(self):
         self.pool.close()
+        self.pool.terminate()
         self.pool.join()
 
-    def estimate_specific_AB_values(self, predicted_periods):
+    def estimate_the_number_of_spins(self, predicted_periods):
 
         model_lists = np.array([[A_temp_list[0], A_temp_list[-1], self.B_init, self.B_final] for A_temp_list in predicted_periods])
 
@@ -82,6 +83,8 @@ class Regression_Model():
         total_deno_pred_list = []
         total_A_lists = []
         total_results = []
+        time_data = self.time_data_32[:self.TIME_RANGE_32] if self.N_PULSE == 32 else self.time_data_256[:self.TIME_RANGE_256]
+
         print("==========================================================================================")
         print('image_width:{}, TIME_RANGE_32:{}, TIME_RANGE_256:{}, B_init:{}, B_end:{}'.format(self.IMAGE_WIDTH, self.TIME_RANGE_32, self.TIME_RANGE_256, self.B_init, self.B_final))
         print("==========================================================================================")
@@ -113,6 +116,9 @@ class Regression_Model():
             A_hier_margin = A_HIER_MARGIN
             side_candi_num = SIDE_CANDI_NUM             # the number of "how many times" to generate 'AB_side_candidate'
 
+            A_existing_margin = 150
+            B_existing_margin = 2500
+
             if self.N_PULSE==32:
                 B_side_min, B_side_max = 6000, 70000
                 B_side_gap = 5000
@@ -132,7 +138,7 @@ class Regression_Model():
                 print("==================== PRE_PROCESSING:True =====================")
 
             class_num = A_num*B_num + 1
-            cpu_num_for_multi = 20
+            cpu_num_for_multi = 10
             batch_for_multi = 256
             class_batch = cpu_num_for_multi*batch_for_multi
 
@@ -153,8 +159,6 @@ class Regression_Model():
 
                 TPk_AB_candi, _, temp_hier_target_AB_candi  = gen_TPk_AB_candidates(AB_idx_set, True, *args)
 
-                print("TPk_AB_candi:{}".format(TPk_AB_candi))
-
                 temp_hier_target_AB_candi[:,:,0] = get_marginal_arr(temp_hier_target_AB_candi[:,:,0], A_hier_margin)
                 if class_idx==0:
                     total_hier_target_AB_candi = temp_hier_target_AB_candi[:]
@@ -167,7 +171,7 @@ class Regression_Model():
                     side_candidates   = np.concatenate((side_candidates, TPk_AB_candi[0, :, 0, :]), axis=0)
                     rest_candidates   = np.concatenate((rest_candidates, TPk_AB_candi[1, :, 1:, :]), axis=0) 
 
-            hier_indices = return_total_hier_index_list(A_idx_list, cut_threshold=2)
+            hier_indices = return_total_hier_index_list(A_idx_list, cut_threshold=3)
             total_class_num = hier_indices[-1][0].__len__() + 1
 
             total_TPk_AB_candidates = np.zeros((total_class_num, num_of_summation*TPk_AB_candi.shape[1], total_class_num+TPk_AB_candi.shape[2]+2, 2))
@@ -210,17 +214,15 @@ class Regression_Model():
                 Y_train_arr[class_idx, :, class_idx] = 1
                 for idx1 in range(cpu_num_for_multi):
                     AB_lists_batch = final_TPk_AB_candidates[class_idx, idx1*mini_batch:(idx1+1)*mini_batch]
-                    # globals()["pool_{}".format(idx1)] = pool.apply_async(gen_M_arr_batch, [AB_lists_batch, model_index_32, self.time_data_32[:self.TIME_RANGE_32],
-                    #                                                                         WL_VALUE, 32, PRE_PROCESS, PRE_SCALE,
-                    #                                                                         self.noise_scale, self.spin_bath_32[:self.TIME_RANGE_32]])
-                    results.append( self.pool.apply_async(gen_M_arr_batch, [AB_lists_batch, model_index_32, self.time_data_32[:self.TIME_RANGE_32],
-                                                    WL_VALUE, 32, PRE_PROCESS, PRE_SCALE, self.noise_scale, self.spin_bath_32[:self.TIME_RANGE_32]]))
+                    globals()["pool_{}".format(idx1)] = self.pool.apply_async(gen_M_arr_batch, [AB_lists_batch, model_index_32, self.time_data_32[:self.TIME_RANGE_32],
+                                                                                            WL_VALUE, 32, PRE_PROCESS, PRE_SCALE,
+                                                                                            self.noise_scale, self.spin_bath_32[:self.TIME_RANGE_32]])
 
                     print("Batch queued")
 
                 for idx2 in range(cpu_num_for_multi):
                     print(f"Waiting for result {idx2}...")
-                    X_train_arr[class_idx, idx2*mini_batch:(idx2+1)*mini_batch] = results[idx2].get(timeout=None)  # globals()["pool_{}".format(idx2)].get(timeout=None)
+                    X_train_arr[class_idx, idx2*mini_batch:(idx2+1)*mini_batch] = globals()["pool_{}".format(idx2)].get(timeout=None)
                     print(f"Result {idx2} done")
 
                 results.clear()
@@ -245,14 +247,12 @@ class Regression_Model():
                     Y_train_256[class_idx, :, class_idx] = 1
                     for idx1 in range(cpu_num_for_multi):
                         AB_lists_batch = final_TPk_AB_candidates[class_idx, idx1*mini_batch:(idx1+1)*mini_batch]
-                        # globals()["pool_{}".format(idx1)] = pool.apply_async(gen_M_arr_batch, [AB_lists_batch, model_index_256, time_data[:self.TIME_RANGE_256],
-                        #                                                                         WL_VALUE, 256, PRE_PROCESS, PRE_SCALE,
-                        #                                                                         self.noise_scale, self.spin_bath[:self.TIME_RANGE_256]])
-                        results.append( self.pool.apply_async(gen_M_arr_batch, [AB_lists_batch, model_index_256, time_data[:self.TIME_RANGE_256],
-                                                      WL_VALUE, 256, PRE_PROCESS, PRE_SCALE, self.noise_scale, self.spin_bath[:self.TIME_RANGE_256]]))
+                        globals()["pool_{}".format(idx1)] = self.pool.apply_async(gen_M_arr_batch, [AB_lists_batch, model_index_256, time_data[:self.TIME_RANGE_256],
+                                                                                                WL_VALUE, 256, PRE_PROCESS, PRE_SCALE,
+                                                                                                self.noise_scale, self.spin_bath[:self.TIME_RANGE_256]])
 
                     for idx2 in range(cpu_num_for_multi):
-                        X_train_256[class_idx, idx2*mini_batch:(idx2+1)*mini_batch] = results[idx2].get(timeout=None)   # globals()["pool_{}".format(idx2)].get(timeout=None)
+                        X_train_256[class_idx, idx2*mini_batch:(idx2+1)*mini_batch] = globals()["pool_{}".format(idx2)].get(timeout=None)
 
                     results.clear()
                     print("class_idx:", class_idx, end=' ')
@@ -317,6 +317,204 @@ class Regression_Model():
             total_results.append([total_raw_pred_list[model_idx], total_deno_pred_list[model_idx], hier_indices]) 
 
         return total_results
+
+    def estimate_specific_AB_values(self, A_lists):
+        total_indices = np.load('./data/total_indices/total_indices_v4_full.npy', allow_pickle=True).item()
+
+        total_pred_list = []
+        for batch_for_multi in [256]:
+            num_of_summation = 4
+            noise_scale = 0.07
+
+            cpu_num_for_multi = 10
+            class_batch = cpu_num_for_multi * batch_for_multi
+
+            A_target_margin = 25
+            A_side_margin = 250
+            A_final_margin = 20
+            distance_btw_target_side = 500
+
+            A_far_side_margin = 5000
+            side_candi_num = 5
+
+            A_num = 1
+            B_num = 1
+            class_num = A_num * B_num + 1
+
+            A_hier_margin = 75
+            A_existing_margin = 150
+            B_existing_margin = 2500
+
+            image_width = self.IMAGE_WIDTH
+            TIME_RANGE = self.TIME_RANGE_32 if self.N_PULSE==32 else self.TIME_RANGE_256
+            time_data = self.time_data_32[:self.TIME_RANGE_32] if self.N_PULSE==32 else self.time_data_256[:self.TIME_RANGE_256]
+            B_final = self.B_final
+            B_init = self.B_init
+            N_PULSE = self.N_PULSE
+            samespin_zero_scale = 0.5
+
+            model_lists = np.array([[A_temp_list[0][0], A_temp_list[0][-1], B_init, B_final] for A_temp_list in A_lists])
+
+            print("================================================================================")
+            print('image_width:{}, TIME_RANGE:{}, B_init:{}, B_end:{}'.format(image_width, TIME_RANGE, B_init, B_final))
+            print("================================================================================")
+
+            for model_idx, [A_first, A_end, B_first, B_end] in enumerate(model_lists):
+                hier_target_index = A_lists[model_idx][1][0]  # hier_index
+                print("========================================================================")
+                print('A_first:{}, A_end:{}, B_first:{}, B_end:{}, Bat_mul:{}'.format(A_first, A_end, B_first, B_end, batch_for_multi))
+                print("========================================================================")
+                data_gen_time = time.time()
+                A_resol, B_resol = 50, B_end - B_first
+
+                A_idx_list = np.arange(A_first, A_end + A_resol, A_num * A_resol)
+                if (B_end - B_first) % B_resol == 0:
+                    B_idx_list = np.arange(B_first, B_first + B_resol, B_num * B_resol)
+                else:
+                    B_idx_list = np.arange(B_first, B_end, B_num * B_resol)
+                AB_idx_set = [[A_idx, B_idx] for A_idx, B_idx in itertools.product(A_idx_list, B_idx_list)]
+
+                A_side_num = 8
+                A_side_resol = 600
+                B_side_min, B_side_max = 1000, 14000
+                B_side_gap = 500
+                B_target_gap = 0
+
+                spin_zero_scale = {'same': samespin_zero_scale, 'side': 0.50, 'mid': 0.05, 'far': 0.05}  # setting 'same'=1.0 for hierarchical model
+
+                epochs = 20
+                valid_batch = 4096
+                valid_mini_batch = 1024
+
+                args = (AB_lists_dic, N_PULSE, A_num, B_num, A_resol, B_resol, A_side_num, A_side_resol, B_side_min,
+                        B_side_max, B_target_gap, B_side_gap, A_target_margin, A_side_margin, A_far_side_margin,
+                        class_batch, class_num, spin_zero_scale, distance_btw_target_side, side_candi_num)
+
+                for class_idx in range(num_of_summation):
+                    TPk_AB_candi, _, temp_hier_target_AB_candi = gen_TPk_AB_candidates(AB_idx_set, True, *args)
+                    temp_hier_target_AB_candi[:, :, 0] = get_marginal_arr(temp_hier_target_AB_candi[:, :, 0],
+                                                                          A_hier_margin)
+                    if class_idx == 0:
+                        total_hier_target_AB_candi = temp_hier_target_AB_candi[:]
+                        target_candidates = TPk_AB_candi[0, :, 0, :]
+                        side_candidates = TPk_AB_candi[1, :, 0, :]
+                        rest_candidates = TPk_AB_candi[1, :, 1:, :]
+                    else:
+                        total_hier_target_AB_candi = np.concatenate(
+                            (total_hier_target_AB_candi, temp_hier_target_AB_candi[:]), axis=1)
+                        target_candidates = np.concatenate((target_candidates, TPk_AB_candi[0, :, 0, :]), axis=0)
+                        side_candidates = np.concatenate((side_candidates, TPk_AB_candi[1, :, 0, :]), axis=0)
+                        rest_candidates = np.concatenate((rest_candidates, TPk_AB_candi[1, :, 1:, :]), axis=0)
+
+                hier_indices = return_total_hier_index_list(A_idx_list, cut_threshold=3)
+                hier_indices = return_reduced_hier_indices(hier_indices)
+                total_class_num = hier_indices[-1][0].__len__() + 1
+
+                total_TPk_AB_candidates = np.zeros((total_class_num, num_of_summation * TPk_AB_candi.shape[1],
+                                                    total_class_num + TPk_AB_candi.shape[2], 2))
+                indices = np.random.randint(rest_candidates.shape[0],
+                                            size=(total_class_num, rest_candidates.shape[0]))
+                total_TPk_AB_candidates[:, :, (total_class_num - 1):-2, :] = rest_candidates[indices]
+                indices = np.random.randint(side_candidates.shape[0],
+                                            size=(total_class_num, side_candidates.shape[0], 2))
+                total_TPk_AB_candidates[:, :, -2:, :] = side_candidates[indices]
+
+                final_TPk_AB_candidates = total_TPk_AB_candidates[:1]
+                for class_idx, hier_index in enumerate(hier_indices):
+                    temp_batch = total_TPk_AB_candidates.shape[1] // len(hier_index)
+                    for idx2, index in enumerate(hier_index):
+                        temp = np.swapaxes(total_hier_target_AB_candi[index], 0, 1)
+                        if idx2 < (len(hier_index) - 1):
+                            temp_idx = np.random.randint(total_hier_target_AB_candi.shape[1], size=(temp_batch))
+                            total_TPk_AB_candidates[class_idx + 1, (idx2) * temp_batch:(idx2 + 1) * temp_batch,
+                            :len(index)] = temp[temp_idx]
+                        else:
+                            residual_batch = \
+                            total_TPk_AB_candidates[class_idx + 1, (idx2) * temp_batch:, :len(index)].shape[0]
+                            temp_idx = np.random.randint(total_hier_target_AB_candi.shape[1], size=(residual_batch))
+                            total_TPk_AB_candidates[class_idx + 1, (idx2) * temp_batch:, :len(index)] = temp[
+                                temp_idx]
+                    final_TPk_AB_candidates = np.concatenate(
+                        (final_TPk_AB_candidates, total_TPk_AB_candidates[class_idx + 1:class_idx + 2, :, :]),
+                        axis=0)
+
+                median_idx = len(AB_idx_set) // 2
+                model_index = get_model_index(total_indices, AB_idx_set[median_idx][0],
+                                              time_thres_idx=TIME_RANGE - 20, image_width=image_width)
+
+                final_TPk_hier_index = len(hier_indices) + hier_target_index + 1
+                final_TPk_AB_candidates = final_TPk_AB_candidates[final_TPk_hier_index]
+                num_of_target_spins = hier_indices[-1][0].__len__() + hier_target_index + 1
+                Y_train_arr = final_TPk_AB_candidates[:, :num_of_target_spins]
+                Y_train_arr = Y_train_arr.reshape(-1, num_of_target_spins * 2)
+                Y_train_arr, scale_lists = Y_train_normalization(Y_train_arr)
+
+                X_train_arr = np.zeros(
+                    (final_TPk_AB_candidates.shape[0], model_index.shape[0], 2 * image_width + 1))
+                mini_batch = X_train_arr.shape[0] // cpu_num_for_multi
+                for idx1 in range(cpu_num_for_multi):
+                    AB_lists_batch = final_TPk_AB_candidates[idx1 * mini_batch:(idx1 + 1) * mini_batch]
+                    globals()["pool_{}".format(idx1)] = self.pool.apply_async(gen_M_arr_batch,
+                                                                         [AB_lists_batch, model_index,
+                                                                          time_data[:TIME_RANGE],
+                                                                          WL_VALUE, N_PULSE, PRE_PROCESS, PRE_SCALE,
+                                                                          noise_scale])
+
+                for idx2 in range(cpu_num_for_multi):
+                    X_train_arr[idx2 * mini_batch:(idx2 + 1) * mini_batch] = globals()["pool_{}".format(idx2)].get(timeout=None)
+                print("class_idx:", class_idx, end=' ')
+                print("Time consumed(s): ", round(time.time() - data_gen_time, 2))
+                X_train_arr = X_train_arr.reshape(-1, model_index.flatten().shape[0])
+
+                X_train_arr, Y_train_arr = shuffle(X_train_arr, Y_train_arr)
+
+                model = Regression_model(X_train_arr.shape[-1], Y_train_arr.shape[-1]).cuda()
+                try:
+                    model(torch.Tensor(X_train_arr[:16]).cuda())
+                except:
+                    raise NameError("The input shape should be revised")
+                total_parameter = sum(p.numel() for p in model.parameters())
+                print('total_parameter: ', total_parameter / 1000000, 'M')
+
+                MODEL_DIR = '/test_regression/'
+                try:
+                    os.mkdir(MODEL_DIR)
+                except:
+                    pass
+                MODEL_PATH = MODEL_DIR + 'reg_model'
+
+                mini_batch_list = [2048]
+                learning_rate_list = [5e-6]
+                op_list = [['Adabound', [30, 15, 7, 1]]]
+                criterion = nn.MSELoss().cuda()
+
+                hyperparameter_set = [[mini_batch, learning_rate, selected_optim_name] for
+                                      mini_batch, learning_rate, selected_optim_name in
+                                      itertools.product(mini_batch_list, learning_rate_list, op_list)]
+                print("==================== A_idx: {}, B_idx: {} ======================".format(A_first, B_first))
+
+                total_loss, total_val_loss, total_acc, trained_model = train(MODEL_PATH, N_PULSE, X_train_arr,
+                                                                             Y_train_arr,
+                                                                             model, hyperparameter_set, criterion,
+                                                                             epochs, valid_batch, valid_mini_batch,
+                                                                             is_regression=True)
+
+                model.load_state_dict(torch.load(trained_model[0][0]))
+                model.eval()
+                print("Model loaded as evalutation mode. Model path:", trained_model[0][0])
+
+                test_data_test = test_data[model_index.flatten()]
+                test_data_test = 1 - (2 * test_data_test - 1)
+                test_data_test = test_data_test.reshape(1, -1)
+                test_data_test = torch.Tensor(test_data_test).cuda()
+                pred = model(test_data_test)
+                pred = pred.detach().cpu().numpy()
+
+                reversed_pred = reverse_normalization(pred.flatten(), scale_lists)
+                total_pred_list.append(reversed_pred)
+                print('Target Value: ', test_spins[model_idx] / 2 / np.pi)
+                print('Prediction Value: ', reversed_pred)
+                print('\n This predicted value is used as the initial guess value for the fine-tuning step.')
         
 class HPC_Model():
 
@@ -341,6 +539,7 @@ class HPC_Model():
 
     def close_pool(self):
         self.pool.close()
+        self.pool.terminate()
         self.pool.join()
         
     def binary_classification_train(self):
@@ -474,14 +673,12 @@ class HPC_Model():
                 for class_idx in range(class_num):
                     for idx2 in range(cpu_num_for_multi):
                         AB_lists_batch = TPk_AB_candi[class_idx, idx1*class_batch+idx2*batch_for_multi:idx1*class_batch+(idx2+1)*batch_for_multi]
-                        # globals()["pool_{}".format(idx2)] = pool.apply_async(gen_M_arr_batch, [AB_lists_batch, model_index, self.time_data[:self.TIME_RANGE],
-                        #                                                                         WL_VALUE, self.N_PULSE, PRE_PROCESS, PRE_SCALE,
-                        #                                                                         self.noise_scale, self.spin_bath[:self.TIME_RANGE]])
-                        result = self.pool.apply_async(gen_M_arr_batch, [AB_lists_batch, model_index, self.time_data[:self.TIME_RANGE],
-                                                     WL_VALUE, self.N_PULSE, PRE_PROCESS, PRE_SCALE, self.noise_scale, self.spin_bath[:self.TIME_RANGE]])
+                        globals()["pool_{}".format(idx2)] = self.pool.apply_async(gen_M_arr_batch, [AB_lists_batch, model_index, self.time_data[:self.TIME_RANGE],
+                                                                                                WL_VALUE, self.N_PULSE, PRE_PROCESS, PRE_SCALE,
+                                                                                                self.noise_scale, self.spin_bath[:self.TIME_RANGE]])
 
                     for idx3 in range(cpu_num_for_multi):  
-                        X_train_arr[class_idx, idx1*class_batch+idx3*batch_for_multi:idx1*class_batch+(idx3+1)*batch_for_multi] = result.get(timeout=None)   # globals()["pool_{}".format(idx3)].get(timeout=None)
+                        X_train_arr[class_idx, idx1*class_batch+idx3*batch_for_multi:idx1*class_batch+(idx3+1)*batch_for_multi] = globals()["pool_{}".format(idx3)].get(timeout=None)
                     print("_", end=' ') 
             
             if self.is_CNN:

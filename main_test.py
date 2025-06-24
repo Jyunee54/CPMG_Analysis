@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+
 np.set_printoptions(suppress=True)
 import glob
 import sys
@@ -10,6 +11,7 @@ from imports.adabound import AdaBound
 import time
 import argparse
 from datetime import datetime
+import multiprocessing
 
 
 # ----------------------------- #
@@ -40,8 +42,8 @@ model_lists = get_AB_model_lists(A_init, A_final, A_step, A_range, B_init, B_fin
 
 # ✅ 핵심 실행부를 __main__ 블록으로 감쌈
 if __name__ == '__main__':
-    import multiprocessing
     multiprocessing.freeze_support()
+    # multiprocessing.set_start_method('spawn')
 
     tic = time.time()
 
@@ -58,6 +60,8 @@ if __name__ == '__main__':
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     np.save(f'./data/results/predicted_periods/predicted_periods_{timestamp}.npy', np.array(predicted_periods, dtype=object))
 
+    # predicted_periods = np.load('./data/results/predicted_periods/predicted_periods_20250619-171443.npy', allow_pickle=True)
+
     print("predicted periods:", predicted_periods)
 
 
@@ -66,7 +70,8 @@ if __name__ == '__main__':
                        A_step, A_range, B_init, B_final, zero_scale, noise_scale, SAVE_DIR_NAME, model_lists, target_side_distance, is_CNN)
 
     regression_model = Regression_Model(*regression_args)
-    spin_nums = regression_model.estimate_specific_spin_nums(predicted_periods)
+
+    spin_nums = regression_model.estimate_the_number_of_spins(predicted_periods)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     np.save(f'./data/results/spin_nums/spin_nums_{timestamp}.npy', np.array(spin_nums, dtype=object))
 
@@ -75,9 +80,10 @@ if __name__ == '__main__':
 
     # 데이터 전처리
     A_lists = return_the_number_of_spins(predicted_periods, spin_nums)
-    regression_results = regression_model.estimate_specific_AB_values_with_the_number_of_spins(np.array(A_lists, dtype=object))
+    regression_results = regression_model.estimate_specific_AB_values(np.array(A_lists, dtype=object))
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     np.save(f'./data/results/regression_results/regression_results_{timestamp}.npy', np.array(regression_results, dtype=object))
+
     regression_model.close_pool()
 
     print("regression_results:", regression_results)
