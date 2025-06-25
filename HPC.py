@@ -51,7 +51,7 @@ class Regression_Model():
         
         self.CUDA_DEVICE, self.N_PULSE, self.IMAGE_WIDTH, self.TIME_RANGE_32, self.TIME_RANGE_256, self.EXISTING_SPINS, \
             self.A_init, self.A_final, self.A_step, self.A_range, self.B_init, self.B_final, self.zero_scale, \
-                self.noise_scale, self.SAVE_DIR_NAME, self.model_lists, self.target_side_distance, self.is_CNN = args
+                self.noise_scale, self.SAVE_DIR_NAME, self.model_lists, self.target_side_distance, self.is_CNN, self.filtered_results = args
 
         self.exp_data_32 = np.load('./data/exp_data/exp_data_32.npy')              # the experimental data to be evalutated
         self.exp_data_deno_32 = np.load('./data/exp_data/exp_data_32_deno.npy')    # the denoised experimental data to be evalutated
@@ -63,10 +63,6 @@ class Regression_Model():
         self.spin_bath_256 = np.load('./data/spin_bath/spin_bath_M_value_N256.npy') # the spin bath data for the experimental N_PULSE (it is not pre-requisite so one can just ignore this line.)
         self.total_indices_32 = np.load('./data/total_indices/total_indices_v4_N32.npy', allow_pickle=True).item()   # pre-calculated time_indexing file by using Eqn.(4) in the maintext
         self.total_indices_256 = np.load('./data/total_indices/total_indices_v4_N256.npy', allow_pickle=True).item()
-
-
-        if self.EXISTING_SPINS:
-            deno_pred_N32_B15000_above = np.load('./data/predicted_results_N32_B15000above.npy')
 
         self.pool = Pool(processes = POOL_PROCESS)
 
@@ -128,7 +124,7 @@ class Regression_Model():
             elif self.N_PULSE==256:
                 B_side_min, B_side_max = 1000, 20000
                 B_side_gap = 0      # distance between target and side (applied for both side_same and side)
-                B_target_gap = 0  
+                B_target_gap = 0
                 distance_btw_target_side = A_target_margin+A_side_margin+self.target_side_distance
 
             PRE_PROCESS, PRE_SCALE = False, 1
@@ -139,10 +135,10 @@ class Regression_Model():
 
             class_num = A_num*B_num + 1
             cpu_num_for_multi = 10
-            batch_for_multi = 256
+            batch_for_multi = 128
             class_batch = cpu_num_for_multi*batch_for_multi
 
-            spin_zero_scale = {'same':self.zero_scale, 'side':0.50, 'mid':0.05, 'far':0.05}  # setting 'same'=1.0 for hierarchical model 
+            spin_zero_scale = {'same':self.zero_scale, 'side':0.50, 'mid':0.05, 'far':0.05}  # setting 'same'=1.0 for hierarchical model
 
             epochs = 20
             valid_batch = 4096
@@ -151,11 +147,9 @@ class Regression_Model():
 
             args = (AB_lists_dic, self.N_PULSE, A_num, B_num, A_resol, B_resol, A_side_num, A_side_resol, B_side_min,
                         B_side_max, B_target_gap, B_side_gap, A_target_margin, A_side_margin, A_far_side_margin,
-                        class_batch, class_num, spin_zero_scale, distance_btw_target_side, side_candi_num) 
+                        class_batch, class_num, spin_zero_scale, distance_btw_target_side, side_candi_num)
 
             for class_idx in range(num_of_summation):
-
-                print("Generating candidates...")
 
                 TPk_AB_candi, _, temp_hier_target_AB_candi  = gen_TPk_AB_candidates(AB_idx_set, True, *args)
 
@@ -164,12 +158,12 @@ class Regression_Model():
                     total_hier_target_AB_candi = temp_hier_target_AB_candi[:]
                     target_candidates = TPk_AB_candi[1, :, 0, :]
                     side_candidates   = TPk_AB_candi[0, :, 0, :]
-                    rest_candidates   = TPk_AB_candi[1, :, 1:, :] 
+                    rest_candidates   = TPk_AB_candi[1, :, 1:, :]
                 else:
                     total_hier_target_AB_candi = np.concatenate((total_hier_target_AB_candi, temp_hier_target_AB_candi[:]), axis=1)
                     target_candidates = np.concatenate((target_candidates, TPk_AB_candi[1, :, 0, :]), axis=0)
                     side_candidates   = np.concatenate((side_candidates, TPk_AB_candi[0, :, 0, :]), axis=0)
-                    rest_candidates   = np.concatenate((rest_candidates, TPk_AB_candi[1, :, 1:, :]), axis=0) 
+                    rest_candidates   = np.concatenate((rest_candidates, TPk_AB_candi[1, :, 1:, :]), axis=0)
 
             hier_indices = return_total_hier_index_list(A_idx_list, cut_threshold=3)
             total_class_num = hier_indices[-1][0].__len__() + 1
@@ -177,15 +171,16 @@ class Regression_Model():
             total_TPk_AB_candidates = np.zeros((total_class_num, num_of_summation*TPk_AB_candi.shape[1], total_class_num+TPk_AB_candi.shape[2]+2, 2))
             indices = np.random.randint(rest_candidates.shape[0], size=(total_class_num, rest_candidates.shape[0]))
             total_TPk_AB_candidates[:, :, (total_class_num-1):-4, :] = rest_candidates[indices]
-            indices = np.random.randint(side_candidates.shape[0], size=(total_class_num, side_candidates.shape[0], 2)) 
-            total_TPk_AB_candidates[:, :, -4:-2, :] = side_candidates[indices] 
-            indices = np.random.randint(side_candidates.shape[0], size=(total_class_num, side_candidates.shape[0], 2)) 
-            total_TPk_AB_candidates[:, :, -2:, :] = side_candidates[indices] 
-            
+            indices = np.random.randint(side_candidates.shape[0], size=(total_class_num, side_candidates.shape[0], 2))
+            total_TPk_AB_candidates[:, :, -4:-2, :] = side_candidates[indices]
+            indices = np.random.randint(side_candidates.shape[0], size=(total_class_num, side_candidates.shape[0], 2))
+            total_TPk_AB_candidates[:, :, -2:, :] = side_candidates[indices]
+
             if self.EXISTING_SPINS:
-                total_TPk_AB_candidates = return_existing_spins_wrt_margins(deno_pred_N32_B12000_above, total_TPk_AB_candidates, A_existing_margin, B_existing_margin)
+                deno_pred_N32_B15000_above = self.filtered_results
+                total_TPk_AB_candidates = return_existing_spins_wrt_margins(deno_pred_N32_B15000_above, total_TPk_AB_candidates, A_existing_margin, B_existing_margin)
             final_TPk_AB_candidates = total_TPk_AB_candidates[:1]
-            for class_idx, hier_index in enumerate(hier_indices): 
+            for class_idx, hier_index in enumerate(hier_indices):
                 temp_batch = total_TPk_AB_candidates.shape[1] // len(hier_index)
                 for idx2, index in enumerate(hier_index):
                     temp = np.swapaxes(total_hier_target_AB_candi[index], 0, 1)
@@ -201,9 +196,9 @@ class Regression_Model():
 
             # below is for generating N32 datasets
             print("Generating N32 data..")
-            model_index_32 = get_model_index(self.total_indices_32, AB_idx_set[median_A_idx][0], time_thres_idx=self.TIME_RANGE_32, image_width=self.IMAGE_WIDTH) 
+            model_index_32 = get_model_index(self.total_indices_32, AB_idx_set[median_A_idx][0], time_thres_idx=self.TIME_RANGE_32, image_width=self.IMAGE_WIDTH)
             if (AB_idx_set[median_A_idx][0] > 13000) | (AB_idx_set[median_A_idx][0] < -13000):
-                model_index_32 = return_index_without_A_idx(self.total_indices_32, model_index_32, 0, self.TIME_RANGE_32, 5)
+                model_index_32, _ = return_index_without_A_idx(self.total_indices_32, model_index_32, 0, self.TIME_RANGE_32, 5)
             total_class_num = final_TPk_AB_candidates.shape[0]
             X_train_arr = np.zeros((total_class_num, final_TPk_AB_candidates.shape[1], model_index_32.shape[0], 2*self.IMAGE_WIDTH+1))
             Y_train_arr = np.zeros((total_class_num, final_TPk_AB_candidates.shape[1], total_class_num))
@@ -218,25 +213,21 @@ class Regression_Model():
                                                                                             WL_VALUE, 32, PRE_PROCESS, PRE_SCALE,
                                                                                             self.noise_scale, self.spin_bath_32[:self.TIME_RANGE_32]])
 
-                    print("Batch queued")
-
                 for idx2 in range(cpu_num_for_multi):
-                    print(f"Waiting for result {idx2}...")
                     X_train_arr[class_idx, idx2*mini_batch:(idx2+1)*mini_batch] = globals()["pool_{}".format(idx2)].get(timeout=None)
-                    print(f"Result {idx2} done")
 
                 results.clear()
                 print("class_idx:", class_idx, end=' ')
 
-            X_train_arr = X_train_arr.reshape(-1, model_index_32.flatten().shape[0]) 
-            Y_train_arr = Y_train_arr.reshape(-1, Y_train_arr.shape[2]) 
+            X_train_arr = X_train_arr.reshape(-1, model_index_32.flatten().shape[0])
+            Y_train_arr = Y_train_arr.reshape(-1, Y_train_arr.shape[2])
 
             # below is for generating N256 datasets
             if self.TIME_RANGE_256:
                 print("Generating N256 data..")
-                model_index_256 = get_model_index(self.total_indices_256, AB_idx_set[median_A_idx][0], time_thres_idx=self.TIME_RANGE_256, image_width=self.IMAGE_WIDTH) 
+                model_index_256 = get_model_index(self.total_indices_256, AB_idx_set[median_A_idx][0], time_thres_idx=self.TIME_RANGE_256, image_width=self.IMAGE_WIDTH)
                 if (AB_idx_set[median_A_idx][0] > 13000) | (AB_idx_set[median_A_idx][0] < -13000):
-                    model_index_256 = return_index_without_A_idx(self.total_indices_256, model_index_256, 0, self.TIME_RANGE_256, 5)
+                    model_index_256, _ = return_index_without_A_idx(self.total_indices_256, model_index_256, 0, self.TIME_RANGE_256, 5)
                 total_class_num = final_TPk_AB_candidates.shape[0]
                 X_train_256 = np.zeros((total_class_num, final_TPk_AB_candidates.shape[1], model_index_256.shape[0], 2*self.IMAGE_WIDTH+1))
                 Y_train_256 = np.zeros((total_class_num, final_TPk_AB_candidates.shape[1], total_class_num))
@@ -256,35 +247,35 @@ class Regression_Model():
 
                     results.clear()
                     print("class_idx:", class_idx, end=' ')
-                
-                X_train_256 = X_train_256.reshape(-1, model_index_256.flatten().shape[0]) 
-                Y_train_256 = Y_train_256.reshape(-1, Y_train_256.shape[2]) 
+
+                X_train_256 = X_train_256.reshape(-1, model_index_256.flatten().shape[0])
+                Y_train_256 = Y_train_256.reshape(-1, Y_train_256.shape[2])
                 X_train_arr = np.concatenate((X_train_32, X_train_256), axis=1)
 
-            model = HPC(X_train_arr.shape[-1], Y_train_arr.shape[-1]).cuda() 
+            model = HPC(X_train_arr.shape[-1], Y_train_arr.shape[-1]).cuda()
             try:
-                model(torch.Tensor(X_train_arr[:16]).cuda()) 
+                model(torch.Tensor(X_train_arr[:16]).cuda())
             except:
                 raise NameError("The input shape should be revised")
 
-            total_parameter = sum(p.numel() for p in model.parameters()) 
+            total_parameter = sum(p.numel() for p in model.parameters())
             print('total_parameter: ', total_parameter / 1000000, 'M')
 
             MODEL_PATH = './data/models/'
-            mini_batch_list = [2048]  
-            learning_rate_list = [5e-6] 
-            op_list = [['Adabound', [30,15,7,1]]] 
+            mini_batch_list = [2048]
+            learning_rate_list = [5e-6]
+            op_list = [['Adabound', [30,15,7,1]]]
             criterion = nn.BCELoss().cuda()
 
             hyperparameter_set = [[mini_batch, learning_rate, selected_optim_name] for mini_batch, learning_rate, selected_optim_name in itertools.product(mini_batch_list, learning_rate_list, op_list)]
             print("==================== A_idx: {}, B_idx: {} ======================".format(A_first, B_first))
 
-            total_loss, total_val_loss, total_acc, trained_model = train(MODEL_PATH, self.N_PULSE, X_train_arr, Y_train_arr, model, hyperparameter_set, criterion, 
-                                                                        epochs, valid_batch, valid_mini_batch, self.exp_data_32, is_pred=False, is_print_results=False, 
-                                                                        is_preprocess=PRE_PROCESS, PRE_SCALE=PRE_SCALE, model_index=model_index_32, 
+            total_loss, total_val_loss, total_acc, trained_model = train(MODEL_PATH, self.N_PULSE, X_train_arr, Y_train_arr, model, hyperparameter_set, criterion,
+                                                                        epochs, valid_batch, valid_mini_batch, self.exp_data_32, is_pred=False, is_print_results=False,
+                                                                        is_preprocess=PRE_PROCESS, PRE_SCALE=PRE_SCALE, model_index=model_index_32,
                                                                         exp_data_deno=self.exp_data_deno_32, is_regression=False)
 
-            model.load_state_dict(torch.load(trained_model[0][0])) 
+            model.load_state_dict(torch.load(trained_model[0][0]))
             model.eval()
             print("Model loaded as evalutation mode. Model path:", trained_model[0][0])
 
@@ -314,7 +305,7 @@ class Regression_Model():
             total_deno_pred_list.append([pred[0], total_class_num, hier_indices[-1][0].__len__()])
             print("deno", np.argmax(pred), np.max(pred), pred)
             print("Config:N_PULSE{}, B_init{}, B_final{}, w{}_batch{}, zero{}".format(self.N_PULSE, self.B_init, self.B_final, self.IMAGE_WIDTH, batch_for_multi, self.zero_scale))
-            total_results.append([total_raw_pred_list[model_idx], total_deno_pred_list[model_idx], hier_indices]) 
+            total_results.append([total_raw_pred_list[model_idx], total_deno_pred_list[model_idx], hier_indices])
 
         return total_results
 
@@ -322,7 +313,7 @@ class Regression_Model():
         total_indices = np.load('./data/total_indices/total_indices_v4_full.npy', allow_pickle=True).item()
 
         total_pred_list = []
-        for batch_for_multi in [256]:
+        for batch_for_multi in [128]:
             num_of_summation = 4
             noise_scale = 0.07
 
@@ -503,7 +494,7 @@ class Regression_Model():
                 model.eval()
                 print("Model loaded as evalutation mode. Model path:", trained_model[0][0])
 
-                test_data_test = test_data[model_index.flatten()]
+                test_data_test = self.exp_data_32[model_index.flatten()]
                 test_data_test = 1 - (2 * test_data_test - 1)
                 test_data_test = test_data_test.reshape(1, -1)
                 test_data_test = torch.Tensor(test_data_test).cuda()
@@ -512,9 +503,9 @@ class Regression_Model():
 
                 reversed_pred = reverse_normalization(pred.flatten(), scale_lists)
                 total_pred_list.append(reversed_pred)
-                print('Target Value: ', test_spins[model_idx] / 2 / np.pi)
-                print('Prediction Value: ', reversed_pred)
-                print('\n This predicted value is used as the initial guess value for the fine-tuning step.')
+                # print('Prediction Value: ', reversed_pred)
+                # print('\n This predicted value is used as the initial guess value for the fine-tuning step.')
+        return  total_pred_list
         
 class HPC_Model():
 
@@ -522,7 +513,7 @@ class HPC_Model():
         
         self.CUDA_DEVICE, self.N_PULSE, self.IMAGE_WIDTH, self.TIME_RANGE, self.EXISTING_SPINS, \
             self.A_init, self.A_final, self.A_step, self.A_range, self.B_init, self.B_final, \
-                self.noise_scale, self.SAVE_DIR_NAME, self.model_lists, self.target_side_distance, self.is_CNN, self.is_remove_model_index = args
+                self.noise_scale, self.SAVE_DIR_NAME, self.model_lists, self.target_side_distance, self.is_CNN, self.is_remove_model_index, self.filtered_results = args
         self.time_range_store = self.TIME_RANGE
         self.image_width_store = self.IMAGE_WIDTH
 
@@ -531,9 +522,6 @@ class HPC_Model():
         self.time_data = np.load('./data/time_data/time_data_{}.npy'.format(self.N_PULSE))          # the time data for the experimental data to be evalutated
         self.spin_bath = np.load('./data/spin_bath/spin_bath_M_value_N{}.npy'.format(self.N_PULSE)) # the spin bath data for the experimental N_PULSE (it is not pre-requisite so one can just ignore this line.)
         self.total_indices = np.load('./data/total_indices/total_indices_v4_N{}.npy'.format(self.N_PULSE), allow_pickle=True).item()
-
-        if self.EXISTING_SPINS:
-            deno_pred_N32_B15000_above = np.load('./data/predicted_results_N32_B15000above.npy')
 
         self.pool = Pool(processes = POOL_PROCESS)
 
@@ -546,7 +534,7 @@ class HPC_Model():
 
         tic = time.time() 
         if self.EXISTING_SPINS:
-            deno_pred_N32_B15000_above = np.load('./data/predicted_results_N32_B15000above.npy') 
+            deno_pred_N32_B15000_above = self.filtered_results
         total_raw_pred_list = []
         total_deno_pred_list = []
         total_A_lists = []
@@ -641,7 +629,6 @@ class HPC_Model():
                     temp_list0[idx] = len(model_index_temp)
                     _, removed_index = return_index_without_A_idx(self.total_indices, model_index_temp, 0, self.TIME_RANGE, 4)
                     if (AB_idx_set[-1][0] < -15000) & (self.is_remove_model_index):
-                        deno_pred_N32_B15000_above = [[11463.29780218,  57308.60242024]]
                         for [A,B] in deno_pred_N32_B15000_above:
                             print("Model index is reduced w.r.t the spin of {}".format([A,B]))
                             A_temp = return_TPk_from_AB(A, B, WL_VALUE)

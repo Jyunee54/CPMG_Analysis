@@ -378,7 +378,7 @@ def gen_M_arr_batch(AB_lists_batch, indexing, time_data, WL, PULSE, is_pre_proce
     else:
         for idx1, AB_list_temp in enumerate(AB_lists_batch):
             X_train_arr_batch[idx1,:] = (spin_bath[index_flat]*M_list_return(time_data[index_flat]*1e-6, WL, AB_list_temp*2*np.pi, PULSE)).reshape(indexing.shape)
-    X_train_arr_batch = X_train_arr_batch.reshape(len(AB_lists_batch), len(indexing), len(indexing[2]))
+    X_train_arr_batch = X_train_arr_batch.reshape(len(AB_lists_batch), indexing.shape[0], indexing.shape[1])
     if noise_scale>0:
         X_train_arr_batch += np.random.uniform(size=X_train_arr_batch.shape)*noise_scale - np.random.uniform(size=X_train_arr_batch.shape)*noise_scale
     
@@ -580,7 +580,7 @@ def return_reduced_hier_indices(hier_indices):
         set_lists = set(map(tuple, temp))
         listed_lists = list(map(list, set_lists))
         total_lists.append(listed_lists) 
-    return np.array(total_lists) 
+    return total_lists
 
 # Used in a regression model to nomalize hyperfine parameters. 
 def Y_train_normalization(arr):
@@ -706,6 +706,19 @@ def HPC_prediction(model, AB_idx_set, total_indices, time_range, image_width, se
 
     return total_A_lists, total_raw_pred_list, total_deno_pred_list
 
-def return_the_number_of_spins(predicted_periods, total_class_num):
-    spin_nums = [-1 for i in range(total_class_num)]
-    return [predicted_periods, spin_nums]
+def return_the_number_of_spins(predicted_periods, spin_nums):
+    results = []
+    for i in range(len(predicted_periods)):
+        num_of_spins = np.argmax(spin_nums[i][1][1])
+        nums = [-1] # -1말고 num_of_spins에 맞는 값 넣어줘야 함
+        results.append([predicted_periods[i], nums])
+    return results
+
+def return_total_spins(regression_results):
+    total_spins = []
+    for i in range(len(regression_results)):
+        num = int(len(regression_results[i]) / 2)
+        print(num)
+        for j in range(num):
+            total_spins.append([regression_results[0][j * 2], regression_results[0][j * 2 + 1]])
+    return total_spins
